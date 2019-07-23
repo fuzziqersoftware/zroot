@@ -167,6 +167,37 @@ void align_roots(FractalResult& current, const FractalResult& prev) {
 
 
 
+void print_usage(const char* argv0) {
+  fprintf(stderr, "\
+usage: %s [options]\n\
+\n\
+options:\n\
+  --width=X and --height=X: specify the size of the output image(s) in pixels.\n\
+      default 2048x1536\n\
+  --window-width=X and --window-height=X: specify the coordinate boundaries of\n\
+      the rendered image. default 4x3 (left edge of image is -4, right edge is\n\
+      +4; top edge is +3, bottom edge is -3)\n\
+  --min-depth=X and --max-depth=X: specify minimum and maximum intensities for\n\
+      iteration counts\n\
+  --coefficients=X1,X2,X3[@KF]: specify the equation to iterate. may be given\n\
+      multiple times to produce a linearly-interpolated video; in this case,\n\
+      all instances of this option should have a keyframe number at the end\n\
+  --output-filename=NAME: write output to this file (windows bmp format). if\n\
+      generating a video, the sequence number is appended to the output\n\
+      filename. if not given, all images are written in sequence to stdout\n\
+\n\
+examples:\n\
+  render julia set for x^3 - i:\n\
+    %s --coefficients=1,0,0,-i --output-filename=cube.bmp\n\
+  animate transition from x^3 - i to x^4 - i to x^5 - i (60 frames each):\n\
+    %s --coefficients=1,0,0,-i@0 --coefficients=1,0,0,0,-i@60 \\\n\
+        --coefficients=1,0,0,0,0,-i@120 --output-filename=cube.bmp\n\
+  animate transition from x^3 - i to x^4 - i and directly encode into a video:\n\
+    %s --coefficients=1,0,0,-i@0 --coefficients=1,0,0,0,-i@60 \\\n\
+        | ffmpeg -r 30 -f bmp_pipe -i - -c:v libx264 -crf 0 -r 30 output.avi\n\
+", argv0, argv0, argv0, argv0);
+}
+
 int main(int argc, char* argv[]) {
   double xmin = -4.0, ymin = -3.0, xmax = 4.0, ymax = 3.0;
   double precision = 0.0000001; // calculation precision
@@ -177,6 +208,7 @@ int main(int argc, char* argv[]) {
   int64_t min_intensity = -1, max_intensity = -1;
   map<size_t, vector<complex>> keyframe_to_coeffs;
   size_t max_coeffs = 0;
+  const char* output_filename = NULL;
   for (int x = 1; x < argc; x++) {
 
     if (!strncmp(argv[x], "--width=", 8)) {
@@ -219,6 +251,9 @@ int main(int argc, char* argv[]) {
 
       keyframe_to_coeffs.emplace(frame, move(coeffs));
 
+    } else if (!strncmp(argv[x], "--output-filename=", 18)) {
+      output_filename = &argv[x][18];
+
     } else {
       fprintf(stderr, "unknown command-line option: %s\n", argv[x]);
       return 1;
@@ -226,7 +261,7 @@ int main(int argc, char* argv[]) {
   }
 
   if (keyframe_to_coeffs.empty()) {
-    fprintf(stderr, "no keyframes defined\n");
+    print_usage(argv[0]);
     return 1;
 
   } else if (keyframe_to_coeffs.size() == 1) {
@@ -235,7 +270,11 @@ int main(int argc, char* argv[]) {
     FractalResult result = julia_fractal(it.second, w, h, xmin, xmax, ymin,
         ymax, precision, detect_precision, max_iterations);
     Image img = color_fractal(result.data, min_intensity, max_intensity);
-    img.save(stdout, Image::ImageFormat::WindowsBitmap);
+    if (output_filename) {
+      img.save(output_filename, Image::ImageFormat::WindowsBitmap);
+    } else {
+      img.save(stdout, Image::ImageFormat::WindowsBitmap);
+    }
 
   } else {
     // rendering a video (or sequence of images)
@@ -283,7 +322,18 @@ int main(int argc, char* argv[]) {
         align_roots(result, prev_result);
       }
       Image img = color_fractal(result.data, min_intensity, max_intensity);
-      img.save(stdout, Image::ImageFormat::WindowsBitmap);
+
+      if (output_filename) {
+        string numbered_filename = output_filename;
+        if (ends_with(numbered_filename, ".bmp")) {
+          numbered_filename = numbered_filename.substr(0, numbered_filename.size() - 4) + string_printf(".%zu.bmp", frame);
+        } else {
+          numbered_filename += string_printf(".%zu", frame);
+        }
+        img.save(numbered_filename.c_str(), Image::ImageFormat::WindowsBitmap);
+      } else {
+        img.save(stdout, Image::ImageFormat::WindowsBitmap);
+      }
 
       prev_result = move(result);
     }
@@ -292,5 +342,3 @@ int main(int argc, char* argv[]) {
 
   return 0;
 }
-
-// ffmpeg -r 30 -f bmp_pipe -i - -vcodec mpeg4 -qscale:v 3 output.avi
