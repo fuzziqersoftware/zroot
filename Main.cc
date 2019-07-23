@@ -175,7 +175,7 @@ int main(int argc, char* argv[]) {
 
   int w = 2048, h = 1536;
   int64_t min_intensity = -1, max_intensity = -1;
-  map<size_t, vector<double>> keyframe_to_coeffs;
+  map<size_t, vector<complex>> keyframe_to_coeffs;
   size_t max_coeffs = 0;
   for (int x = 1; x < argc; x++) {
 
@@ -209,9 +209,9 @@ int main(int argc, char* argv[]) {
       }
 
       tokens = split(tokens[0], ',');
-      vector<double> coeffs;
+      vector<complex> coeffs;
       for (const string& token : tokens) {
-        coeffs.push_back(stof(token));
+        coeffs.emplace_back(token.c_str());
       }
       if (coeffs.size() > max_coeffs) {
         max_coeffs = coeffs.size();
@@ -243,7 +243,7 @@ int main(int argc, char* argv[]) {
     // make sure coeffs are the same length in all keyframes
     for (auto& it : keyframe_to_coeffs) {
       if (it.second.size() < max_coeffs) {
-        it.second.insert(it.second.begin(), max_coeffs - it.second.size(), 0.0);
+        it.second.insert(it.second.begin(), max_coeffs - it.second.size(), complex());
       }
     }
 
@@ -251,7 +251,7 @@ int main(int argc, char* argv[]) {
     auto next_kf_it = kf_it;
     advance(next_kf_it, 1);
 
-    vector<double> frame_coeffs = kf_it->second;
+    vector<complex> frame_coeffs = kf_it->second;
     FractalResult prev_result = {vector<complex>(), Image(0, 0)};
     size_t end_frame = keyframe_to_coeffs.rbegin()->first;
     for (size_t frame = 0; frame <= end_frame; frame++) {
@@ -271,8 +271,9 @@ int main(int argc, char* argv[]) {
       }
 
       fprintf(stderr, "... frame %zu of %zu ->", frame, end_frame);
-      for (double coeff : frame_coeffs) {
-        fprintf(stderr, " %lf", coeff);
+      for (const complex& coeff : frame_coeffs) {
+        string s = coeff.str();
+        fprintf(stderr, " %s", s.c_str());
       }
       fputc('\r', stderr);
 

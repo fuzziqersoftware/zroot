@@ -13,7 +13,7 @@
 using namespace std;
 
 
-FractalResult julia_fractal(const vector<double>& coeffs, size_t w, size_t h,
+FractalResult julia_fractal(const vector<complex>& coeffs, size_t w, size_t h,
     double xmin, double xmax, double ymin, double ymax, double precision,
     double detect_precision, size_t max_depth) {
 

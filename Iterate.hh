@@ -5,5 +5,5 @@
 #include "Complex.hh"
 
 
-complex root(const std::vector<double>& coeffs, const complex& guess,
+complex root(const std::vector<complex>& coeffs, const complex& guess,
     double precision, size_t* max);

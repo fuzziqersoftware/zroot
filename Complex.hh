@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string>
+
 
 struct complex {
   double real;
@@ -7,6 +9,9 @@ struct complex {
 
   complex();
   complex(double, double);
+  complex(const char*);
+
+  std::string str() const;
 
   inline bool operator==(const complex& b) const {
     return (this->real == b.real) && (this->imag == b.imag);

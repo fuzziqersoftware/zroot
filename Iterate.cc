@@ -9,7 +9,7 @@ using namespace std;
 
 static const complex zero = {0, 0};
 
-static complex root_iterate(const vector<double>& coeffs,
+static complex root_iterate(const vector<complex>& coeffs,
     const complex& guess) {
 
   complex numer(0, 0);
@@ -24,13 +24,13 @@ static complex root_iterate(const vector<double>& coeffs,
 
   int64_t degree = static_cast<int64_t>(coeffs.size() - 1);
   for (ssize_t x = 0; x < coeffs.size(); x++) {
-    numer = numer + (guess_powers[degree - x] * ((degree - x - 1) * coeffs[x]));
-    denom = denom + (guess_powers[degree - x - 1] * ((degree - x) * coeffs[x]));
+    numer = numer + (guess_powers[degree - x] * coeffs[x]) * (degree - x - 1);
+    denom = denom + (guess_powers[degree - x - 1] * coeffs[x]) * (degree - x);
   }
   return (numer / denom);
 }
 
-complex root(const vector<double>& coeffs, const complex& guess,
+complex root(const vector<complex>& coeffs, const complex& guess,
     double precision, size_t* max) {
 
   complex this_guess = guess;
