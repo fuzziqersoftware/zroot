@@ -1,0 +1,4 @@
+zroot
+*.o
+*.dSYM
+.DS_Store
