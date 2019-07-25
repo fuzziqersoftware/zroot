@@ -2,11 +2,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
+#include <deque>
 #include <map>
 #include <phosg/Image.hh>
 #include <phosg/Strings.hh>
 #include <set>
+#include <thread>
 
 #include "Complex.hh"
 #include "Iterate.hh"
@@ -167,6 +170,96 @@ void align_roots(FractalResult& current, const FractalResult& prev) {
 
 
 
+class MultiFrameRenderer {
+public:
+  struct FrameMetadata {
+    size_t frame_index;
+    vector<complex> frame_coeffs;
+    size_t w, h;
+    double xmin, xmax, ymin, ymax;
+    double precision, detect_precision;
+    size_t max_iterations;
+  };
+
+private:
+  size_t thread_count;
+  vector<thread> threads;
+
+  mutex lock;
+  condition_variable cond;
+  deque<FrameMetadata> pending_work;
+  map<size_t, FractalResult> results;
+  size_t next_result;
+
+public:
+
+  MultiFrameRenderer(size_t thread_count) : thread_count(thread_count),
+      next_result(0) { }
+
+  ~MultiFrameRenderer() {
+    for (auto& t : this->threads) {
+      t.join();
+    }
+  }
+
+  void add(FrameMetadata&& m) {
+    unique_lock<mutex> g(this->lock);
+    this->pending_work.emplace_back(move(m));
+  }
+
+  void start() {
+    while (this->threads.size() < this->thread_count) {
+      this->threads.emplace_back(&MultiFrameRenderer::worker, this);
+    }
+  }
+
+  FractalResult get_result() {
+    for (;;) {
+      unique_lock<mutex> g(this->lock);
+      auto it = this->results.find(this->next_result);
+      if (it == this->results.end()) {
+        this->cond.wait(g);
+        continue;
+      }
+      this->next_result++;
+      FractalResult ret = move(it->second);
+      this->results.erase(it);
+      return ret;
+    }
+  }
+
+  void worker() {
+    for (;;) {
+      FrameMetadata fm;
+      {
+        unique_lock<mutex> g(this->lock);
+        if (this->pending_work.empty()) {
+          break;
+        }
+        if (this->results.size() > 2 * this->threads.size()) {
+          g.unlock();
+          usleep(1000000);
+          continue;
+        }
+        fm = move(this->pending_work.front());
+        this->pending_work.pop_front();
+      }
+
+      FractalResult res = julia_fractal(fm.frame_coeffs, fm.w, fm.h, fm.xmin,
+          fm.xmax, fm.ymin, fm.ymax, fm.precision, fm.detect_precision,
+          fm.max_iterations);
+
+      {
+        unique_lock<mutex> g(this->lock);
+        this->results.emplace(fm.frame_index, move(res));
+      }
+      this->cond.notify_one();
+    }
+  }
+};
+
+
+
 void print_usage(const char* argv0) {
   fprintf(stderr, "\
 usage: %s [options]\n\
@@ -185,6 +278,8 @@ options:\n\
   --output-filename=NAME: write output to this file (windows bmp format). if\n\
       generating a video, the sequence number is appended to the output\n\
       filename. if not given, all images are written in sequence to stdout\n\
+  --thread-count=X: use this many threads to render video frames in parallel.\n\
+      if not given, use as many threads as there are cpu cores\n\
 \n\
 examples:\n\
   render julia set for x^3 - i:\n\
@@ -208,6 +303,7 @@ int main(int argc, char* argv[]) {
   int64_t min_intensity = -1, max_intensity = -1;
   map<size_t, vector<complex>> keyframe_to_coeffs;
   size_t max_coeffs = 0;
+  size_t thread_count = 0;
   const char* output_filename = NULL;
   for (int x = 1; x < argc; x++) {
 
@@ -254,10 +350,17 @@ int main(int argc, char* argv[]) {
     } else if (!strncmp(argv[x], "--output-filename=", 18)) {
       output_filename = &argv[x][18];
 
+    } else if (!strncmp(argv[x], "--thread-count=", 15)) {
+      thread_count = atoi(&argv[x][15]);
+
     } else {
       fprintf(stderr, "unknown command-line option: %s\n", argv[x]);
       return 1;
     }
+  }
+
+  if (thread_count == 0) {
+    thread_count = thread::hardware_concurrency();
   }
 
   if (keyframe_to_coeffs.empty()) {
@@ -290,34 +393,46 @@ int main(int argc, char* argv[]) {
     auto next_kf_it = kf_it;
     advance(next_kf_it, 1);
 
-    vector<complex> frame_coeffs = kf_it->second;
-    FractalResult prev_result = {vector<complex>(), Image(0, 0)};
+    MultiFrameRenderer renderer(thread_count);
     size_t end_frame = keyframe_to_coeffs.rbegin()->first;
     for (size_t frame = 0; frame <= end_frame; frame++) {
 
+      MultiFrameRenderer::FrameMetadata fm;
+      fm.frame_index = frame;
+      fm.w = w;
+      fm.h = h;
+      fm.xmin = xmin;
+      fm.xmax = xmax;
+      fm.ymin = ymin;
+      fm.ymax = ymax;
+      fm.precision = precision;
+      fm.detect_precision = detect_precision;
+      fm.max_iterations = max_iterations;
       if ((next_kf_it != keyframe_to_coeffs.end()) && (frame == next_kf_it->first)) {
         kf_it++;
         next_kf_it++;
-        frame_coeffs = kf_it->second;
+        fm.frame_coeffs = kf_it->second;
 
       } else {
         // linearly interpolate coeffs between the keyframes
+        size_t interval_frames = next_kf_it->first - kf_it->first;
+        size_t progress = frame - kf_it->first;
         for (size_t x = 0; x < kf_it->second.size(); x++) {
-          size_t interval_frames = next_kf_it->first - kf_it->first;
-          size_t progress = frame - kf_it->first;
-          frame_coeffs[x] = ((next_kf_it->second[x] * progress) + (kf_it->second[x] * (interval_frames - progress))) / interval_frames;
+          fm.frame_coeffs.emplace_back(((next_kf_it->second[x] * progress) + (kf_it->second[x] * (interval_frames - progress))) / interval_frames);
         }
       }
 
-      fprintf(stderr, "... frame %zu of %zu ->", frame, end_frame);
-      for (const complex& coeff : frame_coeffs) {
-        string s = coeff.str();
-        fprintf(stderr, " %s", s.c_str());
-      }
-      fputc('\r', stderr);
+      renderer.add(move(fm));
+    }
 
-      FractalResult result = julia_fractal(frame_coeffs, w, h, xmin, xmax, ymin,
-          ymax, precision, detect_precision, max_iterations);
+    renderer.start();
+
+    FractalResult prev_result = {vector<complex>(), Image(0, 0)};
+    for (size_t frame = 0; frame <= end_frame; frame++) {
+      auto result = renderer.get_result();
+
+      fprintf(stderr, "... completed frame %zu of %zu\r", frame, end_frame);
+
       if (!prev_result.roots.empty()) {
         align_roots(result, prev_result);
       }
