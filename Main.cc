@@ -244,7 +244,6 @@ public:
           break;
         }
         if (this->results.size() > this->ready_limit) {
-          this->worker_progress[worker_index] = 0;
           g.unlock();
           usleep(100000);
           continue;
@@ -258,11 +257,14 @@ public:
           fm.max_iterations, fm.result_bit_width,
           &this->worker_progress[worker_index]);
 
+      this->worker_progress[worker_index] = fm.h;
       {
         unique_lock<mutex> g(this->lock);
         this->results.emplace(fm.frame_index, move(res));
       }
       this->cond.notify_one();
+
+      this->worker_progress[worker_index] = 0;
     }
   }
 };
