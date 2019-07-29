@@ -6,6 +6,7 @@
 
 #include <deque>
 #include <map>
+#include <phosg/Filesystem.hh>
 #include <phosg/Image.hh>
 #include <phosg/Strings.hh>
 #include <set>
@@ -16,6 +17,7 @@
 #include "JuliaSet.hh"
 
 using namespace std;
+using namespace std::chrono_literals;
 
 
 struct Color {
@@ -179,13 +181,16 @@ public:
     double xmin, xmax, ymin, ymax;
     double precision, detect_precision;
     size_t max_iterations;
+    size_t result_bit_width;
   };
 
 private:
   size_t thread_count;
+  size_t ready_limit;
   vector<thread> threads;
+  vector<size_t> worker_progress;
 
-  mutex lock;
+  mutable mutex lock;
   condition_variable cond;
   deque<FrameMetadata> pending_work;
   map<size_t, FractalResult> results;
@@ -193,13 +198,27 @@ private:
 
 public:
 
-  MultiFrameRenderer(size_t thread_count) : thread_count(thread_count),
-      next_result(0) { }
+  MultiFrameRenderer(size_t thread_count, size_t ready_limit) :
+      thread_count(thread_count), ready_limit(ready_limit), next_result(0) { }
 
   ~MultiFrameRenderer() {
     for (auto& t : this->threads) {
       t.join();
     }
+  }
+
+  const vector<size_t>& get_worker_progress() const {
+    return this->worker_progress;
+  }
+
+  size_t work_queue_length() const {
+    unique_lock<mutex> g(this->lock);
+    return this->pending_work.size();
+  }
+
+  size_t result_queue_length() const {
+    unique_lock<mutex> g(this->lock);
+    return this->results.size();
   }
 
   void add(FrameMetadata&& m) {
@@ -208,8 +227,9 @@ public:
   }
 
   void start() {
+    this->worker_progress.resize(this->thread_count);
     while (this->threads.size() < this->thread_count) {
-      this->threads.emplace_back(&MultiFrameRenderer::worker, this);
+      this->threads.emplace_back(&MultiFrameRenderer::worker, this, this->threads.size());
     }
   }
 
@@ -217,18 +237,17 @@ public:
     for (;;) {
       unique_lock<mutex> g(this->lock);
       auto it = this->results.find(this->next_result);
-      if (it == this->results.end()) {
-        this->cond.wait(g);
-        continue;
+      if (it != this->results.end()) {
+        this->next_result++;
+        FractalResult ret = move(it->second);
+        this->results.erase(it);
+        return ret;
       }
-      this->next_result++;
-      FractalResult ret = move(it->second);
-      this->results.erase(it);
-      return ret;
+      this->cond.wait(g);
     }
   }
 
-  void worker() {
+  void worker(size_t worker_index) {
     for (;;) {
       FrameMetadata fm;
       {
@@ -236,9 +255,10 @@ public:
         if (this->pending_work.empty()) {
           break;
         }
-        if (this->results.size() > 2 * this->threads.size()) {
+        if (this->results.size() > this->ready_limit) {
+          this->worker_progress[worker_index] = 0;
           g.unlock();
-          usleep(1000000);
+          usleep(100000);
           continue;
         }
         fm = move(this->pending_work.front());
@@ -247,7 +267,8 @@ public:
 
       FractalResult res = julia_fractal(fm.frame_coeffs, fm.w, fm.h, fm.xmin,
           fm.xmax, fm.ymin, fm.ymax, fm.precision, fm.detect_precision,
-          fm.max_iterations);
+          fm.max_iterations, fm.result_bit_width,
+          &this->worker_progress[worker_index]);
 
       {
         unique_lock<mutex> g(this->lock);
@@ -260,34 +281,64 @@ public:
 
 
 
+void report_status_thread_fn(atomic<bool>* should_exit,
+    MultiFrameRenderer* renderer, size_t* compile_thread_frame, size_t height,
+    size_t end_frame) {
+  while (!should_exit->load()) {
+    string status = "workers";
+    for (size_t progress : renderer->get_worker_progress()) {
+      status += string_printf(" %5zu/%5zu", progress, height);
+    }
+    status += string_printf(" compiler %zu/%zu queue %zu ready %zu\n",
+        *compile_thread_frame, end_frame, renderer->work_queue_length(),
+        renderer->result_queue_length());
+    fwritex(stderr, status);
+    usleep(1000000);
+  }
+}
+
+
+
+
 void print_usage(const char* argv0) {
   fprintf(stderr, "\
-usage: %s [options]\n\
+Usage: %s [options]\n\
 \n\
-options:\n\
+Options:\n\
   --width=X and --height=X: specify the size of the output image(s) in pixels.\n\
-      default 2048x1536\n\
+      Default size is 2048x1536.\n\
   --window-width=X and --window-height=X: specify the coordinate boundaries of\n\
-      the rendered image. default 4x3 (left edge of image is -4, right edge is\n\
-      +4; top edge is +3, bottom edge is -3)\n\
-  --min-depth=X and --max-depth=X: specify minimum and maximum intensities for\n\
-      iteration counts\n\
-  --coefficients=X1,X2,X3[@KF]: specify the equation to iterate. may be given\n\
-      multiple times to produce a linearly-interpolated video; in this case,\n\
-      all instances of this option should have a keyframe number at the end\n\
-  --output-filename=NAME: write output to this file (windows bmp format). if\n\
+      the rendered image. The default is 4 by 3, which means the left edge of\n\
+      the image is x = -4, the right edge is x = +4, the top edge is y = +3,\n\
+      and the bottom edge is y = -3.\n\
+  --min-depth=X and --max-depth=X: specify minimum and maximum intensities. The\n\
+      color of each pixel illustrates which root that position is attracted to,\n\
+      and the intensity illustrates how many iterations were required to\n\
+      approach that root. By default, the intensities in the image will\n\
+      automatically scale based on the minimum and maximum iteration counts\n\
+      over the entire image, but this can be overridden with these options.\n\
+  --bit-width=X: specify width of integers used when computing the result.\n\
+      Values are 8 (default), 16, 32, and 64.\n\
+  --coefficients=X1,X2,X3[@KF]: specify the expression to iterate. This option\n\
+      may be given multiple times to produce a linearly-interpolated video; in\n\
+      this case, all instances of this option should have a keyframe number at\n\
+      the end. The examples below illustrate this usage more clearly.\n\
+  --output-filename=NAME: write output to this file (in Windows BMP format). If\n\
       generating a video, the sequence number is appended to the output\n\
-      filename. if not given, all images are written in sequence to stdout\n\
+      filename. If this option is not given, all images are written in sequence\n\
+      to stdout, which is appropriate for ffmpeg's bmp_pipe input filter.\n\
   --thread-count=X: use this many threads to render video frames in parallel.\n\
-      if not given, use as many threads as there are cpu cores\n\
+      If not given, use as many threads as there are CPU cores.\n\
+  --ready-limit=X: don\'t start new frames if there are this many waiting to be\n\
+      written to the output. Useful to control memory pressure.\n\
 \n\
-examples:\n\
-  render julia set for x^3 - i:\n\
+Examples:\n\
+  Render Julia set for x^3 - i:\n\
     %s --coefficients=1,0,0,-i --output-filename=cube.bmp\n\
-  animate transition from x^3 - i to x^4 - i to x^5 - i (60 frames each):\n\
+  Animate transition from x^3 - i to x^4 - i to x^5 - i (60 frames each):\n\
     %s --coefficients=1,0,0,-i@0 --coefficients=1,0,0,0,-i@60 \\\n\
-        --coefficients=1,0,0,0,0,-i@120 --output-filename=cube.bmp\n\
-  animate transition from x^3 - i to x^4 - i and directly encode into a video:\n\
+        --coefficients=1,0,0,0,0,-i@120 --output-filename=output_frame.bmp\n\
+  Animate transition from x^3 - i to x^4 - i and directly encode into a video:\n\
     %s --coefficients=1,0,0,-i@0 --coefficients=1,0,0,0,-i@60 \\\n\
         | ffmpeg -r 30 -f bmp_pipe -i - -c:v libx264 -crf 0 -r 30 output.avi\n\
 ", argv0, argv0, argv0, argv0);
@@ -304,6 +355,8 @@ int main(int argc, char* argv[]) {
   map<size_t, vector<complex>> keyframe_to_coeffs;
   size_t max_coeffs = 0;
   size_t thread_count = 0;
+  ssize_t ready_limit = -1;
+  size_t result_bit_width = 8;
   const char* output_filename = NULL;
   for (int x = 1; x < argc; x++) {
 
@@ -352,6 +405,10 @@ int main(int argc, char* argv[]) {
 
     } else if (!strncmp(argv[x], "--thread-count=", 15)) {
       thread_count = atoi(&argv[x][15]);
+    } else if (!strncmp(argv[x], "--ready-limit=", 14)) {
+      ready_limit = atoi(&argv[x][14]);
+    } else if (!strncmp(argv[x], "--bit-width=", 12)) {
+      result_bit_width = atoi(&argv[x][12]);
 
     } else {
       fprintf(stderr, "unknown command-line option: %s\n", argv[x]);
@@ -362,6 +419,9 @@ int main(int argc, char* argv[]) {
   if (thread_count == 0) {
     thread_count = thread::hardware_concurrency();
   }
+  if (ready_limit < 0) {
+    ready_limit = 2 * thread_count;
+  }
 
   if (keyframe_to_coeffs.empty()) {
     print_usage(argv[0]);
@@ -370,8 +430,10 @@ int main(int argc, char* argv[]) {
   } else if (keyframe_to_coeffs.size() == 1) {
     // rendering a single image
     auto it = *keyframe_to_coeffs.begin();
+    size_t progress;
     FractalResult result = julia_fractal(it.second, w, h, xmin, xmax, ymin,
-        ymax, precision, detect_precision, max_iterations);
+        ymax, precision, detect_precision, max_iterations, result_bit_width,
+        &progress);
     Image img = color_fractal(result.data, min_intensity, max_intensity);
     if (output_filename) {
       img.save(output_filename, Image::ImageFormat::WindowsBitmap);
@@ -393,7 +455,7 @@ int main(int argc, char* argv[]) {
     auto next_kf_it = kf_it;
     advance(next_kf_it, 1);
 
-    MultiFrameRenderer renderer(thread_count);
+    MultiFrameRenderer renderer(thread_count, ready_limit);
     size_t end_frame = keyframe_to_coeffs.rbegin()->first;
     for (size_t frame = 0; frame <= end_frame; frame++) {
 
@@ -408,6 +470,7 @@ int main(int argc, char* argv[]) {
       fm.precision = precision;
       fm.detect_precision = detect_precision;
       fm.max_iterations = max_iterations;
+      fm.result_bit_width = result_bit_width;
       if ((next_kf_it != keyframe_to_coeffs.end()) && (frame == next_kf_it->first)) {
         kf_it++;
         next_kf_it++;
@@ -427,11 +490,14 @@ int main(int argc, char* argv[]) {
 
     renderer.start();
 
-    FractalResult prev_result = {vector<complex>(), Image(0, 0)};
-    for (size_t frame = 0; frame <= end_frame; frame++) {
-      auto result = renderer.get_result();
+    size_t frame = 0;
+    atomic<bool> should_exit(false);
+    thread status_thread(&report_status_thread_fn, &should_exit, &renderer,
+        &frame, h, end_frame);
 
-      fprintf(stderr, "... completed frame %zu of %zu\r", frame, end_frame);
+    FractalResult prev_result = {vector<complex>(), Image(0, 0)};
+    for (frame = 0; frame <= end_frame; frame++) {
+      FractalResult result = renderer.get_result();
 
       if (!prev_result.roots.empty()) {
         align_roots(result, prev_result);
@@ -452,6 +518,9 @@ int main(int argc, char* argv[]) {
 
       prev_result = move(result);
     }
+
+    should_exit.store(true);
+    status_thread.join();
     fputc('\n', stderr);
   }
 

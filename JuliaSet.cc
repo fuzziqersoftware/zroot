@@ -15,11 +15,12 @@ using namespace std;
 
 FractalResult julia_fractal(const vector<complex>& coeffs, size_t w, size_t h,
     double xmin, double xmax, double ymin, double ymax, double precision,
-    double detect_precision, size_t max_depth) {
+    double detect_precision, size_t max_depth, size_t result_bit_width,
+    size_t* progress) {
 
   size_t degree = coeffs.size() - 1;
   double xs = (xmax - xmin) / w, ys = (ymax - ymin) / h, xp, yp = ymin;
-  FractalResult result = {vector<complex>(), Image(w, h, false, 64)};
+  FractalResult result = {vector<complex>(), Image(w, h, false, result_bit_width)};
 
   for (size_t y = 0; y < h; y++) {
     xp = xmin;
@@ -53,6 +54,7 @@ FractalResult julia_fractal(const vector<complex>& coeffs, size_t w, size_t h,
       xp += xs;
     }
     yp += ys;
+    *progress = y;
   }
 
   return result;
