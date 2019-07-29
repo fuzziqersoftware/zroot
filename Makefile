@@ -3,6 +3,12 @@ CXXFLAGS=-DMACOSX -O3 -g -Wall -std=c++14 -I/opt/local/include
 LDFLAGS=-g -std=c++14 -L/opt/local/lib -lphosg
 EXECUTABLES=zroot
 
+UNAME_M := $(shell uname -m)
+ifeq ($(UNAME_M),x86_64)
+	OBJECTS += Iterate-Assembly.o
+	CXXFLAGS += -DX86_64
+endif
+
 all: zroot
 
 zroot: $(OBJECTS)
