@@ -48,7 +48,8 @@ vector<Color> colors({
   {0x80, 0x00, 0x80}, // dark purple
 });
 
-Image color_fractal(const Image& data, int64_t min_intensity = -1, int64_t max_intensity = -1) {
+Image color_fractal(const Image& data, int64_t min_intensity = -1,
+    int64_t max_intensity = -1, vector<ssize_t> replacement_map = vector<ssize_t>()) {
   bool compute_min_intensity = false, compute_max_intensity = false;
 
   if (min_intensity < 0) {
@@ -99,6 +100,8 @@ Image color_fractal(const Image& data, int64_t min_intensity = -1, int64_t max_i
       depth = (depth > max_intensity) ? max_intensity : depth;
       depth = (depth < min_intensity) ? min_intensity : depth;
 
+      root_index = (root_index < replacement_map.size()) ? replacement_map[root_index] : root_index;
+
       const Color& color = colors[root_index];
       uint64_t r, g, b;
       if (intensity_range == 0) {
@@ -119,7 +122,7 @@ Image color_fractal(const Image& data, int64_t min_intensity = -1, int64_t max_i
 
 
 
-void align_roots(FractalResult& current, const FractalResult& prev) {
+vector<ssize_t> align_roots(const FractalResult& current, const FractalResult& prev) {
   multimap<double, pair<size_t, size_t>> distance_pairs;
   for (size_t x = 0; x < prev.roots.size(); x++) {
     for (size_t y = 0; y < current.roots.size(); y++) {
@@ -152,22 +155,7 @@ void align_roots(FractalResult& current, const FractalResult& prev) {
     unused_root_indices.erase(it);
   }
 
-  for (size_t y = 0; y < current.data.get_height(); y++) {
-    for (size_t x = 0; x < current.data.get_width(); x++) {
-      uint64_t depth, root_index, error;
-      current.data.read_pixel(x, y, &depth, &root_index, &error);
-      if (error) {
-        continue;
-      }
-      current.data.write_pixel(x, y, depth, replacement_map[root_index], 0);
-    }
-  }
-
-  vector<complex> new_roots(current.roots.size());
-  for (size_t x = 0; x < replacement_map.size(); x++) {
-    new_roots[replacement_map[x]] = current.roots[x];
-  }
-  current.roots = move(new_roots);
+  return replacement_map;
 }
 
 
@@ -499,10 +487,19 @@ int main(int argc, char* argv[]) {
     for (frame = 0; frame <= end_frame; frame++) {
       FractalResult result = renderer.get_result();
 
+      vector<ssize_t> replacement_map;
       if (!prev_result.roots.empty()) {
-        align_roots(result, prev_result);
+        replacement_map = align_roots(result, prev_result);
       }
-      Image img = color_fractal(result.data, min_intensity, max_intensity);
+      Image img = color_fractal(result.data, min_intensity, max_intensity,
+          replacement_map);
+
+      // reorder the roots so the next frame will make sense
+      vector<complex> new_roots(result.roots.size());
+      for (size_t x = 0; x < replacement_map.size(); x++) {
+        new_roots[replacement_map[x]] = result.roots[x];
+      }
+      result.roots = move(new_roots);
 
       if (output_filename) {
         string numbered_filename = output_filename;
