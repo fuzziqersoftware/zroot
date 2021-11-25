@@ -277,11 +277,11 @@ void report_status_thread_fn(atomic<bool>* should_exit,
   while (!should_exit->load()) {
     string status = "workers";
     for (size_t progress : renderer->get_worker_progress()) {
-      status += string_printf(" %5zu/%5zu", progress, height);
+      status += string_printf(" %5zu/%-5zu", progress, height);
     }
-    status += string_printf(" compiler %zu/%zu queue %zu ready %zu\n",
-        *compile_thread_frame, end_frame, renderer->work_queue_length(),
-        renderer->result_queue_length());
+    status += string_printf(" compiler %zu/%zu ready %zu queue %zu\n",
+        *compile_thread_frame, end_frame, renderer->result_queue_length(),
+        renderer->work_queue_length());
     fwritex(stderr, status);
     usleep(1000000);
   }
