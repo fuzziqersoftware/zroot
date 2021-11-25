@@ -9,7 +9,7 @@ using namespace std;
 
 static const complex zero = {0, 0};
 
-#ifndef X86_64
+#ifndef AMD64
 static complex root_iterate(const vector<complex>& coeffs,
     const complex& guess) {
 
@@ -40,7 +40,7 @@ complex root(const vector<complex>& coeffs, const complex& guess,
   complex last(0, 0);
   do {
     last = this_guess;
-#ifdef X86_64
+#ifdef AMD64
     root_iterate_asm(coeffs.data(), coeffs.size(), &this_guess, &this_guess);
 #else
     this_guess = root_iterate(coeffs, this_guess);

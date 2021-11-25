@@ -8,9 +8,9 @@
 complex root(const std::vector<complex>& coeffs, const complex& guess,
     double precision, size_t* max);
 
-// on x86_64 theres an optimized assembly version of this code that's a bit
+// On amd64 there's an optimized assembly version of this code that's a bit
 // faster
-#ifdef X86_64
+#ifdef AMD64
 
 extern "C" {
 

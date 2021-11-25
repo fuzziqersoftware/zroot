@@ -5,8 +5,8 @@ EXECUTABLES=zroot
 
 UNAME_M := $(shell uname -m)
 ifeq ($(UNAME_M),x86_64)
-	OBJECTS += Iterate-Assembly.o
-	CXXFLAGS += -DX86_64
+	OBJECTS += Iterate-amd64.o
+	CXXFLAGS += -DAMD64
 endif
 
 all: zroot
