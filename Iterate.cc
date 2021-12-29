@@ -24,7 +24,7 @@ static complex root_iterate(const vector<complex>& coeffs,
   }
 
   int64_t degree = static_cast<int64_t>(coeffs.size() - 1);
-  for (ssize_t x = 0; x < coeffs.size(); x++) {
+  for (ssize_t x = 0; x < static_cast<ssize_t>(coeffs.size()); x++) {
     numer = numer + (guess_powers[degree - x] * coeffs[x]) * (degree - x - 1);
     denom = denom + (guess_powers[degree - x - 1] * coeffs[x]) * (degree - x);
   }

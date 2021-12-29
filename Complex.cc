@@ -75,7 +75,7 @@ string complex::str() const {
 
 complex complex::pow(int p) const {
   complex res = *this;
-  for (size_t x = 0; x < p; x++) {
+  for (int x = 0; x < p; x++) {
     res = res * (*this);
   }
   return res;

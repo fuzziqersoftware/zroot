@@ -1,4 +1,14 @@
-zroot
-*.o
-*.dSYM
+# Finder files (macOS)
 .DS_Store
+
+# Build products
+zroot
+
+# CMake files
+CMakeCache.txt
+CMakeFiles
+Makefile
+CTestTestFile.cmake
+Testing
+cmake_install.cmake
+install_manifest.txt

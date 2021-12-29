@@ -75,10 +75,10 @@ Image color_fractal(const Image& data, int64_t min_intensity = -1,
           continue;
         }
 
-        if (compute_max_intensity && (depth < min_intensity)) {
+        if (compute_max_intensity && (static_cast<int64_t>(depth) < min_intensity)) {
           min_intensity = depth;
         }
-        if (compute_max_intensity && (depth > max_intensity)) {
+        if (compute_max_intensity && (static_cast<int64_t>(depth) > max_intensity)) {
           max_intensity = depth;
         }
       }
@@ -97,17 +97,17 @@ Image color_fractal(const Image& data, int64_t min_intensity = -1,
         continue;
       }
 
-      depth = (depth > max_intensity) ? max_intensity : depth;
-      depth = (depth < min_intensity) ? min_intensity : depth;
+      depth = (static_cast<int64_t>(depth) > max_intensity) ? max_intensity : depth;
+      depth = (static_cast<int64_t>(depth) < min_intensity) ? min_intensity : depth;
 
       root_index = (root_index < replacement_map.size()) ? replacement_map[root_index] : root_index;
 
       const Color& color = colors[root_index];
       uint64_t r, g, b;
       if (intensity_range == 0) {
-        r = (depth >= max_intensity) ? color.r : 0;
-        g = (depth >= max_intensity) ? color.g : 0;
-        b = (depth >= max_intensity) ? color.b : 0;
+        r = (static_cast<int64_t>(depth) >= max_intensity) ? color.r : 0;
+        g = (static_cast<int64_t>(depth) >= max_intensity) ? color.g : 0;
+        b = (static_cast<int64_t>(depth) >= max_intensity) ? color.b : 0;
       } else {
         r = (((depth - min_intensity) * color.r) / intensity_range);
         g = (((depth - min_intensity) * color.g) / intensity_range);
@@ -132,7 +132,7 @@ vector<ssize_t> align_roots(const FractalResult& current, const FractalResult& p
   }
 
   set<ssize_t> unused_root_indices;
-  for (ssize_t x = 0; x < current.roots.size(); x++) {
+  for (ssize_t x = 0; x < static_cast<ssize_t>(current.roots.size()); x++) {
     unused_root_indices.emplace(x);
   }
 
