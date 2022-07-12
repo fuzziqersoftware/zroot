@@ -66,7 +66,7 @@ Image color_fractal(const Image& data, int64_t min_intensity = -1,
   }
 
   // compute the min and max intensities in the entire data image
-  if (compute_max_intensity || compute_max_intensity) {
+  if (compute_min_intensity || compute_max_intensity) {
     for (size_t y = 0; y < data.get_height(); y++) {
       for (size_t x = 0; x < data.get_width(); x++) {
         uint64_t depth, root_index, error;
