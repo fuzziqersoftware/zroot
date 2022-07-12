@@ -440,9 +440,9 @@ int main(int argc, char* argv[]) {
         &progress);
     Image img = color_fractal(result.data, min_intensity, max_intensity);
     if (output_filename) {
-      img.save(output_filename, Image::ImageFormat::WindowsBitmap);
+      img.save(output_filename, Image::Format::WINDOWS_BITMAP);
     } else {
-      img.save(stdout, Image::ImageFormat::WindowsBitmap);
+      img.save(stdout, Image::Format::WINDOWS_BITMAP);
     }
 
   } else {
@@ -524,9 +524,9 @@ int main(int argc, char* argv[]) {
         } else {
           numbered_filename += string_printf(".%zu", frame);
         }
-        img.save(numbered_filename.c_str(), Image::ImageFormat::WindowsBitmap);
+        img.save(numbered_filename.c_str(), Image::Format::WINDOWS_BITMAP);
       } else {
-        img.save(stdout, Image::ImageFormat::WindowsBitmap);
+        img.save(stdout, Image::Format::WINDOWS_BITMAP);
       }
 
       prev_result = move(result);
