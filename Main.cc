@@ -176,7 +176,7 @@ private:
   size_t thread_count;
   size_t ready_limit;
   vector<thread> threads;
-  vector<size_t> worker_progress;
+  vector<ssize_t> worker_progress;
 
   mutable mutex lock;
   condition_variable cond;
@@ -195,7 +195,7 @@ public:
     }
   }
 
-  const vector<size_t>& get_worker_progress() const {
+  const vector<ssize_t>& get_worker_progress() const {
     return this->worker_progress;
   }
 
@@ -215,7 +215,7 @@ public:
   }
 
   void start() {
-    this->worker_progress.resize(this->thread_count);
+    this->worker_progress.resize(this->thread_count, -1);
     while (this->threads.size() < this->thread_count) {
       this->threads.emplace_back(&MultiFrameRenderer::worker, this, this->threads.size());
     }
@@ -266,6 +266,7 @@ public:
 
       this->worker_progress[worker_index] = 0;
     }
+    this->worker_progress[worker_index] = -1;
   }
 };
 
@@ -275,13 +276,26 @@ void report_status_thread_fn(atomic<bool>* should_exit,
     MultiFrameRenderer* renderer, size_t* compile_thread_frame, size_t height,
     size_t end_frame) {
   while (!should_exit->load()) {
-    string status = "workers";
-    for (size_t progress : renderer->get_worker_progress()) {
-      status += string_printf(" %5zu/%-5zu", progress, height);
+    auto worker_progresses = renderer->get_worker_progress();
+    size_t lines_rendered = (*compile_thread_frame + renderer->result_queue_length()) * height;
+
+    string status = "th";
+    for (ssize_t progress : worker_progresses) {
+      if (progress < 0) {
+        status += " ..../....";
+      } else {
+        lines_rendered += progress;
+        status += string_printf(" %4zu", progress);
+      }
     }
-    status += string_printf(" compiler %zu/%zu ready %zu queue %zu\n",
-        *compile_thread_frame, end_frame, renderer->result_queue_length(),
-        renderer->work_queue_length());
+
+    size_t max_lines_rendered = height * end_frame;
+    double progress = static_cast<double>(lines_rendered) / max_lines_rendered;
+
+    status += string_printf(" /%zu cm %zu/%zu rd %zu q %zu @ %g%%\n",
+        height, *compile_thread_frame, end_frame,
+        renderer->result_queue_length(), renderer->work_queue_length(),
+        progress * 100.0);
     fwritex(stderr, status);
     usleep(1000000);
   }
@@ -420,7 +434,7 @@ int main(int argc, char* argv[]) {
   } else if (keyframe_to_coeffs.size() == 1) {
     // rendering a single image
     auto it = *keyframe_to_coeffs.begin();
-    size_t progress;
+    ssize_t progress;
     FractalResult result = julia_fractal(it.second, w, h, xmin, xmax, ymin,
         ymax, precision, detect_precision, max_iterations, result_bit_width,
         &progress);

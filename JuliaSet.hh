@@ -15,4 +15,4 @@ struct FractalResult {
 FractalResult julia_fractal(const std::vector<complex>& coeffs, size_t w,
     size_t h, double xmin, double xmax, double ymin, double ymax,
     double precision, double detect_precision, size_t max_depth,
-    size_t result_bit_width, size_t* progress);
+    size_t result_bit_width, ssize_t* progress);
