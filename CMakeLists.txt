@@ -22,7 +22,7 @@ link_directories("/usr/local/lib")
 # Executable definitions
 
 add_executable(zroot Complex.cc Iterate.cc JuliaSet.cc Main.cc)
-target_link_libraries(zroot phosg)
+target_link_libraries(zroot phosg pthread)
 
 
 
