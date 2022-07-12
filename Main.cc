@@ -4,8 +4,10 @@
 #include <string.h>
 #include <unistd.h>
 
+#include <condition_variable>
 #include <deque>
 #include <map>
+#include <mutex>
 #include <phosg/Filesystem.hh>
 #include <phosg/Image.hh>
 #include <phosg/Strings.hh>
