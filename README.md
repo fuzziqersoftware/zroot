@@ -1,4 +1,4 @@
-# zroot
+# zroot <img align="right" src="s-zroot.png" />
 
 zroot generates high-resolution Julia set fractal images and videos, but it doesn't do so quickly.
 
